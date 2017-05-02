@@ -36,6 +36,8 @@
 #import "TAPageControl.h"
 #import "UIImageView+WebCache.h"
 #import "UIView+SDExtension.h"
+#import <SDWebImageManager.h>
+#import <UIImageView+WebCache.h>
 
 #define kCycleScrollViewInitialPageControlDotSize CGSizeMake(10, 10)
 
@@ -59,6 +61,7 @@ UIImageView *backgroundImageView; // 当imageURLs为空时的背景图
 
 @property(nonatomic, strong) UIImageView *mengCengImageView;
 
+
 @end
 
 @implementation SDCycleScrollView
@@ -71,7 +74,10 @@ UIImageView *backgroundImageView; // 当imageURLs为空时的背景图
     return self;
 }
 
-- (void)awakeFromNib {
+- (void)awakeFromNib
+{
+    [super awakeFromNib];
+
     [self initialization];
     [self setupMainView];
 }
@@ -84,10 +90,13 @@ UIImageView *backgroundImageView; // 当imageURLs为空时的背景图
     _titleLabelBackgroundColor =
     [UIColor colorWithRed:0 green:0 blue:0 alpha:0.5];
     _titleLabelHeight = 30;
+    _titleLabelTextAlignment = NSTextAlignmentLeft;
     _autoScroll = YES;
     _infiniteLoop = YES;
     _showPageControl = YES;
     _pageControlDotSize = kCycleScrollViewInitialPageControlDotSize;
+    _pageControlBottomOffset = 0;
+    _pageControlRightOffset = 0;
     _pageControlStyle = SDCycleScrollViewPageContolStyleClassic;
     _hidesForSinglePage = YES;
     _currentPageDotColor = [UIColor whiteColor];
@@ -294,6 +303,9 @@ UIImageView *backgroundImageView; // 当imageURLs为空时的背景图
     if (imagePathsGroup.count < _imagePathsGroup.count) {
         [_mainView setContentOffset:CGPointZero animated:NO];
     }
+
+    [self invalidateTimer];
+
     
     _imagePathsGroup = imagePathsGroup;
     
@@ -304,20 +316,11 @@ UIImageView *backgroundImageView; // 当imageURLs为空时的背景图
         self.mainView.scrollEnabled = YES;
         [self setAutoScroll:self.autoScroll];
     } else {
-        [self invalidateTimer];
         self.mainView.scrollEnabled = NO;
     }
     
     [self setupPageControl];
     [self.mainView reloadData];
-    
-    if (imagePathsGroup.count) {
-        [self.backgroundImageView removeFromSuperview];
-    } else {
-        if (self.backgroundImageView && !self.backgroundImageView.superview) {
-            [self insertSubview:self.backgroundImageView belowSubview:self.mainView];
-        }
-    }
 }
 
 - (void)setImageURLStringsGroup:(NSArray *)imageURLStringsGroup {
@@ -345,6 +348,19 @@ UIImageView *backgroundImageView; // 当imageURLs为空时的背景图
     self.imagePathsGroup = [localizationImageNamesGroup copy];
 }
 
+- (void)setTitlesGroup:(NSArray *)titlesGroup
+{
+    _titlesGroup = titlesGroup;
+    if (self.onlyDisplayText) {
+        NSMutableArray *temp = [NSMutableArray new];
+        for (int i = 0; i < _titlesGroup.count; i++) {
+            [temp addObject:@""];
+        }
+        self.backgroundColor = [UIColor clearColor];
+        self.imageURLStringsGroup = [temp copy];
+    }
+}
+
 #pragma mark - actions
 
 - (void)setupTimer {
@@ -367,13 +383,17 @@ UIImageView *backgroundImageView; // 当imageURLs为空时的背景图
     if (_pageControl)
     [_pageControl removeFromSuperview]; // 重新加载数据时调整
     
+
     if (self.imagePathsGroup.count == 0)
     return;
+
+    if (self.imagePathsGroup.count == 0 || self.onlyDisplayText) return;
+
     
     if ((self.imagePathsGroup.count == 1) && self.hidesForSinglePage)
     return;
     
-    int indexOnPageControl = [self currentIndex] % self.imagePathsGroup.count;
+    int indexOnPageControl = [self pageControlIndexWithCurrentCellIndex:[self currentIndex]];
     
     switch (self.pageControlStyle) {
             case SDCycleScrollViewPageContolStyleAnimated: {
@@ -419,7 +439,7 @@ UIImageView *backgroundImageView; // 当imageURLs为空时的背景图
     if (targetIndex > _totalItemsCount) {
         targetIndex = _totalItemsCount;
     }
-    
+
     if (targetIndex >= _totalItemsCount) {
         if (self.infiniteLoop) {
             targetIndex = _totalItemsCount * 0.5;
@@ -451,15 +471,23 @@ UIImageView *backgroundImageView; // 当imageURLs为空时的背景图
         index = (_mainView.contentOffset.y + _flowLayout.itemSize.height * 0.5) /
         _flowLayout.itemSize.height;
     }
-    return index;
+    
+    return MAX(0, index);
+}
+
+- (int)pageControlIndexWithCurrentCellIndex:(NSInteger)index
+{
+    return (int)index % self.imagePathsGroup.count;
 }
 
 - (void)clearCache {
     [[self class] clearImagesCache];
 }
 
-+ (void)clearImagesCache {
-    [[[SDWebImageManager sharedManager] imageCache] clearDisk];
++ (void)clearImagesCache
+{
+    [[[SDWebImageManager sharedManager] imageCache] clearDiskOnCompletion:nil];
+
 }
 
 #pragma mark - life circles
@@ -493,9 +521,9 @@ UIImageView *backgroundImageView; // 当imageURLs为空时的背景图
               }
         size = [pageControl sizeForNumberOfPages:self.imagePathsGroup.count];
     } else {
-        size = CGSizeMake(self.imagePathsGroup.count *
-                          self.pageControlDotSize.width * 1.2,
-                          self.pageControlDotSize.height);
+
+        size = CGSizeMake(self.imagePathsGroup.count * self.pageControlDotSize.width * 1.5, self.pageControlDotSize.height);
+
     }
     CGFloat x = (self.sd_width - size.width) * 0.5;
     if (self.pageControlAliment == SDCycleScrollViewPageContolAlimentRight) {
@@ -508,7 +536,10 @@ UIImageView *backgroundImageView; // 当imageURLs为空时的背景图
         [pageControl sizeToFit];
     }
     
-    self.pageControl.frame = CGRectMake(x, y, size.width, size.height);
+    CGRect pageControlFrame = CGRectMake(x, y, size.width, size.height);
+    pageControlFrame.origin.y -= self.pageControlBottomOffset;
+    pageControlFrame.origin.x -= self.pageControlRightOffset;
+    self.pageControl.frame = pageControlFrame;
     self.pageControl.hidden = !_showPageControl;
     
     if (self.backgroundImageView) {
@@ -535,6 +566,16 @@ UIImageView *backgroundImageView; // 当imageURLs为空时的背景图
 
 #pragma mark - public actions
 
+
+- (void)adjustWhenControllerViewWillAppera
+{
+    long targetIndex = [self currentIndex];
+    if (targetIndex < _totalItemsCount) {
+        [_mainView scrollToItemAtIndexPath:[NSIndexPath indexPathForItem:targetIndex inSection:0] atScrollPosition:UICollectionViewScrollPositionNone animated:NO];
+    }
+}
+
+
 #pragma mark - UICollectionViewDataSource
 
 - (NSInteger)collectionView:(UICollectionView *)collectionView
@@ -542,16 +583,15 @@ UIImageView *backgroundImageView; // 当imageURLs为空时的背景图
     return _totalItemsCount;
 }
 
-- (UICollectionViewCell *)collectionView:(UICollectionView *)collectionView
-                  cellForItemAtIndexPath:(NSIndexPath *)indexPath {
-    SDCollectionViewCell *cell =
-    [collectionView dequeueReusableCellWithReuseIdentifier:ID
-                                              forIndexPath:indexPath];
-    long itemIndex = indexPath.item % self.imagePathsGroup.count;
+
+- (UICollectionViewCell *)collectionView:(UICollectionView *)collectionView cellForItemAtIndexPath:(NSIndexPath *)indexPath
+{
+    SDCollectionViewCell *cell = [collectionView dequeueReusableCellWithReuseIdentifier:ID forIndexPath:indexPath];
+    long itemIndex = [self pageControlIndexWithCurrentCellIndex:indexPath.item];
     
     NSString *imagePath = self.imagePathsGroup[itemIndex];
     
-    if ([imagePath isKindOfClass:[NSString class]]) {
+    if (!self.onlyDisplayText && [imagePath isKindOfClass:[NSString class]]) {
         if ([imagePath hasPrefix:@"http"]) {
             [cell.imageView sd_setImageWithURL:[NSURL URLWithString:imagePath]
                               placeholderImage:self.placeholderImage];
@@ -562,7 +602,7 @@ UIImageView *backgroundImageView; // 当imageURLs为空时的背景图
             }
             cell.imageView.image = image;
         }
-    } else if ([imagePath isKindOfClass:[UIImage class]]) {
+    } else if (!self.onlyDisplayText && [imagePath isKindOfClass:[UIImage class]]) {
         cell.imageView.image = (UIImage *)imagePath;
     }
     
@@ -573,11 +613,13 @@ UIImageView *backgroundImageView; // 当imageURLs为空时的背景图
     if (!cell.hasConfigured) {
         cell.titleLabelBackgroundColor = self.titleLabelBackgroundColor;
         cell.titleLabelHeight = self.titleLabelHeight;
+        cell.titleLabelTextAlignment = self.titleLabelTextAlignment;
         cell.titleLabelTextColor = self.titleLabelTextColor;
         cell.titleLabelTextFont = self.titleLabelTextFont;
         cell.hasConfigured = YES;
         cell.imageView.contentMode = self.bannerImageViewContentMode;
         cell.clipsToBounds = YES;
+        cell.onlyDisplayText = self.onlyDisplayText;
     }
     
     if (self.delegate && [self.delegate respondsToSelector:@selector(cycleScrollView:cell:index:)])
@@ -594,9 +636,10 @@ didSelectItemAtIndexPath:(NSIndexPath *)indexPath {
                                                     didSelectItemAtIndex:)]) {
         [self.delegate cycleScrollView:self
                   didSelectItemAtIndex:indexPath.item % self.imagePathsGroup.count];
+
     }
     if (self.clickItemOperationBlock) {
-        self.clickItemOperationBlock(indexPath.item % self.imagePathsGroup.count);
+        self.clickItemOperationBlock([self pageControlIndexWithCurrentCellIndex:indexPath.item]);
     }
 }
 
@@ -606,7 +649,7 @@ didSelectItemAtIndexPath:(NSIndexPath *)indexPath {
     if (!self.imagePathsGroup.count)
     return; // 解决清除timer时偶尔会出现的问题
     int itemIndex = [self currentIndex];
-    int indexOnPageControl = itemIndex % self.imagePathsGroup.count;
+    int indexOnPageControl = [self pageControlIndexWithCurrentCellIndex:itemIndex];
     
     float contentOffset = _mainView.contentOffset.x / _flowLayout.itemSize.width;
     if (self.delegate && [self.delegate respondsToSelector:@selector(cycleScrollView:scrollToIndex:)])
@@ -644,7 +687,7 @@ didSelectItemAtIndexPath:(NSIndexPath *)indexPath {
     if (!self.imagePathsGroup.count)
     return; // 解决清除timer时偶尔会出现的问题
     int itemIndex = [self currentIndex];
-    int indexOnPageControl = itemIndex % self.imagePathsGroup.count;
+    int indexOnPageControl = [self pageControlIndexWithCurrentCellIndex:itemIndex];
     
     if ([self.delegate
          respondsToSelector:@selector(cycleScrollView:didScrollToIndex:)]) {
